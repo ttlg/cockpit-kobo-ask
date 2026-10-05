@@ -9,7 +9,9 @@ type CockpitQuestion = {
   id: string;
   summary: string;
   choices: string[];
+  choiceDescriptions?: Record<string, string>;
   multiple: boolean;
+  allowInput: boolean;
 };
 
 type CockpitAsk = {
@@ -19,7 +21,9 @@ type CockpitAsk = {
   createdAt: string;
   summary: string;
   choices: string[];
+  choiceDescriptions?: Record<string, string>;
   multiple: boolean;
+  allowInput?: boolean;
   questions?: CockpitQuestion[];
   media?: unknown[];
 };
@@ -27,10 +31,12 @@ type CockpitAsk = {
 type CockpitResult<T> = { ok: true; data: T } | { ok: false; error: unknown };
 
 type TerminalQuestion = {
-  id: string | null;
-  summary: string;
+  id: string;
+  title: string;
   choices: string[];
+  choiceDescriptions: string[];
   multiple: boolean;
+  allowInput: boolean;
 };
 
 type TerminalAsk = {
@@ -38,12 +44,13 @@ type TerminalAsk = {
   heading: string;
   time: string;
   summary: string;
-  answerable: boolean;
-  unanswerableReason: string | null;
+  mediaCount: number;
   questions: TerminalQuestion[];
 };
 
-type AnswerGroup = { questionId: string | null; choiceIndexes: number[] };
+type AnswerEntry = { questionId: string | null; choiceIndexes: number[]; input: string };
+
+type AnswerRequest = { answers: AnswerEntry[]; wholeAnswer: string };
 
 type RelayConfig = { port: number; token: string };
 
@@ -75,27 +82,34 @@ const runCockpit = <T>(args: string[]): Promise<CockpitResult<T>> =>
 
 const toPlainText = (markdown: string): string =>
   markdown
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1 ($2)")
     .replace(/\*\*|__|`/g, "")
     .replace(/^#{1,6}\s+/gm, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-const toTerminalQuestions = (ask: CockpitAsk): TerminalQuestion[] =>
+const questionsOf = (ask: CockpitAsk): CockpitQuestion[] =>
   ask.questions && ask.questions.length > 0
-    ? ask.questions.map((question) => ({
-        id: question.id,
-        summary: toPlainText(question.summary),
-        choices: question.choices,
-        multiple: question.multiple,
-      }))
-    : [{ id: null, summary: "", choices: ask.choices, multiple: ask.multiple }];
+    ? ask.questions
+    : [
+        {
+          id: "default",
+          summary: ask.summary,
+          choices: ask.choices,
+          choiceDescriptions: ask.choiceDescriptions,
+          multiple: ask.multiple === true,
+          allowInput: ask.allowInput !== false,
+        },
+      ];
 
-const unanswerableReasonOf = ({ ask, questions }: { ask: CockpitAsk; questions: TerminalQuestion[] }): string | null => {
-  if (ask.media && ask.media.length > 0) return "画像や動画が付いているので、Mac で確認して回答してください。";
-  if (questions.some((question) => question.choices.length === 0)) return "自由入力の質問なので、Mac で回答してください。";
-  return null;
-};
+const toTerminalQuestion = ({ question, ask, questionCount }: { question: CockpitQuestion; ask: CockpitAsk; questionCount: number }): TerminalQuestion => ({
+  id: question.id,
+  title: questionCount > 1 || question.summary !== ask.summary ? toPlainText(question.summary) : "",
+  choices: question.choices,
+  choiceDescriptions: question.choices.map((choice) => question.choiceDescriptions?.[choice] ?? ""),
+  multiple: question.multiple === true,
+  allowInput: question.allowInput !== false,
+});
 
 const headingOf = (ask: CockpitAsk): string => {
   const title = ask.title || "確認リクエスト";
@@ -113,43 +127,50 @@ const byCreatedAt = (left: CockpitAsk, right: CockpitAsk): number =>
   left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
 
 const toTerminalAsk = (ask: CockpitAsk): TerminalAsk => {
-  const questions = toTerminalQuestions(ask);
-  const unanswerableReason = unanswerableReasonOf({ ask, questions });
+  const questions = questionsOf(ask);
   return {
     id: ask.id,
     heading: headingOf(ask),
     time: timeOf(ask.createdAt),
     summary: toPlainText(ask.summary),
-    answerable: unanswerableReason === null,
-    unanswerableReason,
-    questions,
+    mediaCount: ask.media?.length ?? 0,
+    questions: questions.map((question) => toTerminalQuestion({ question, ask, questionCount: questions.length })),
   };
 };
 
-const toAnswerArgs = ({ askId, answers }: { askId: string; answers: AnswerGroup[] }): string[] => [
+const entryArgs = (entry: AnswerEntry): string[] => [
+  ...(entry.questionId === null ? [] : ["--question", entry.questionId]),
+  ...entry.choiceIndexes.flatMap((index) => ["--choice-index", String(index)]),
+  ...(entry.input === "" ? [] : ["--input", entry.input]),
+];
+
+const toAnswerArgs = ({ askId, request }: { askId: string; request: AnswerRequest }): string[] => [
   "ask",
   "answer",
   askId,
-  ...answers.flatMap((group) => [
-    ...(group.questionId === null ? [] : ["--question", group.questionId]),
-    ...group.choiceIndexes.flatMap((index) => ["--choice-index", String(index)]),
-  ]),
+  ...request.answers.flatMap(entryArgs),
+  ...(request.wholeAnswer === "" ? [] : ["--whole-answer", request.wholeAnswer]),
 ];
 
-const isAnswerGroups = (value: unknown): value is AnswerGroup[] =>
-  Array.isArray(value) &&
-  value.length > 0 &&
-  value.every(
-    (group: unknown) =>
-      typeof group === "object" &&
-      group !== null &&
-      "questionId" in group &&
-      (group.questionId === null || typeof group.questionId === "string") &&
-      "choiceIndexes" in group &&
-      Array.isArray(group.choiceIndexes) &&
-      group.choiceIndexes.length > 0 &&
-      group.choiceIndexes.every((index: unknown) => Number.isInteger(index) && (index as number) >= 1),
-  );
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+
+const isAnswerEntry = (value: unknown): value is AnswerEntry =>
+  isRecord(value) &&
+  (value.questionId === null || typeof value.questionId === "string") &&
+  Array.isArray(value.choiceIndexes) &&
+  value.choiceIndexes.every((index: unknown) => Number.isInteger(index) && (index as number) >= 1) &&
+  typeof value.input === "string" &&
+  (value.choiceIndexes.length > 0 || value.input.trim() !== "");
+
+const toAnswerRequest = (value: unknown): AnswerRequest | null => {
+  if (!isRecord(value) || !Array.isArray(value.answers) || typeof value.wholeAnswer !== "string") return null;
+  if (!value.answers.every(isAnswerEntry)) return null;
+  const request: AnswerRequest = {
+    answers: value.answers.map((entry) => ({ ...entry, input: entry.input.trim() })),
+    wholeAnswer: value.wholeAnswer.trim(),
+  };
+  return request.answers.length > 0 || request.wholeAnswer !== "" ? request : null;
+};
 
 const sendJson = ({ response, status, body }: { response: ServerResponse; status: number; body: unknown }): void => {
   response.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
@@ -178,6 +199,12 @@ const parseJson = (text: string): unknown => {
   }
 };
 
+const relayCockpit = async ({ response, args }: { response: ServerResponse; args: string[] }): Promise<void> => {
+  const result = await runCockpit<unknown>(args);
+  if (!result.ok) return sendJson({ response, status: 502, body: { ok: false, error: result.error } });
+  sendJson({ response, status: 200, body: { ok: true } });
+};
+
 const listAsks = async (response: ServerResponse): Promise<void> => {
   const result = await runCockpit<{ asks: CockpitAsk[] }>(["ask", "list"]);
   if (!result.ok) return sendJson({ response, status: 502, body: { ok: false, error: result.error } });
@@ -185,12 +212,9 @@ const listAsks = async (response: ServerResponse): Promise<void> => {
 };
 
 const answerAsk = async ({ request, response, askId }: { request: IncomingMessage; response: ServerResponse; askId: string }): Promise<void> => {
-  const body = parseJson(await readBody(request));
-  const answers = typeof body === "object" && body !== null && "answers" in body ? body.answers : null;
-  if (!isAnswerGroups(answers)) return sendJson({ response, status: 400, body: { ok: false, error: "invalid answers" } });
-  const result = await runCockpit<unknown>(toAnswerArgs({ askId, answers }));
-  if (!result.ok) return sendJson({ response, status: 502, body: { ok: false, error: result.error } });
-  sendJson({ response, status: 200, body: { ok: true } });
+  const answerRequest = toAnswerRequest(parseJson(await readBody(request)));
+  if (!answerRequest) return sendJson({ response, status: 400, body: { ok: false, error: "invalid answers" } });
+  await relayCockpit({ response, args: toAnswerArgs({ askId, request: answerRequest }) });
 };
 
 const route = async ({ request, response }: { request: IncomingMessage; response: ServerResponse }): Promise<void> => {
@@ -198,8 +222,9 @@ const route = async ({ request, response }: { request: IncomingMessage; response
   if (request.method === "GET" && path === "/health") return sendJson({ response, status: 200, body: { ok: true } });
   if (!isAuthorized(request)) return sendJson({ response, status: 401, body: { ok: false, error: "unauthorized" } });
   if (request.method === "GET" && path === "/asks") return listAsks(response);
-  const answerMatch = /^\/asks\/([A-Za-z0-9_-]+)\/answer$/.exec(path);
-  if (request.method === "POST" && answerMatch) return answerAsk({ request, response, askId: answerMatch[1] });
+  const actionMatch = /^\/asks\/([A-Za-z0-9_-]+)\/(answer|close)$/.exec(path);
+  if (request.method === "POST" && actionMatch?.[2] === "answer") return answerAsk({ request, response, askId: actionMatch[1] });
+  if (request.method === "POST" && actionMatch?.[2] === "close") return relayCockpit({ response, args: ["ask", "close", actionMatch[1]] });
   sendJson({ response, status: 404, body: { ok: false, error: "not found" } });
 };
 
