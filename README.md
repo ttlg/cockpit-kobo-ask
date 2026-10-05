@@ -130,6 +130,7 @@ The plugin shows English or Japanese, following KOReader's language setting (**S
 - **No Asks appear**: check the relay log. If it shows no requests from the Kobo, make sure KOReader is running and Wi-Fi is connected, then choose **Open inbox** to see the error message.
 - **The Mac's IP changed**: rerun `scripts/install-kobo.sh`, or change the URL from the Cockpit Ask menu.
 - **Changes do not show up**: restart KOReader after copying a new plugin. KOReader loads plugins only at startup.
+- **The Cockpit Ask menu is missing**: check `.adds/koreader/crash.log` for `Error when loading`. If a plugin file is missing and an `FSCK0000.000` file appears in the plugin folder, the Kobo's file system check discarded it after USB. Rerun `scripts/install-kobo.sh`, which recreates the plugin folder from scratch.
 
 ## License
 

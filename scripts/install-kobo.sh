@@ -44,8 +44,9 @@ if [ -z "$url" ]; then
 fi
 
 plugin_dir="$kobo_mount/.adds/koreader/plugins/askterminal.koplugin"
-mkdir -p "$plugin_dir"
-cp "$repo_dir"/askterminal.koplugin/*.lua "$plugin_dir/"
+rm -rf "$plugin_dir"
+mkdir "$plugin_dir"
+cp -X "$repo_dir"/askterminal.koplugin/*.lua "$plugin_dir/"
 cat > "$plugin_dir/config.lua" <<LUA
 return {
     url = "$url",
@@ -54,7 +55,7 @@ return {
     enabled = true,
 }
 LUA
-dot_clean -m "$kobo_mount/.adds" 2>/dev/null || true
+find "$plugin_dir" -name '._*' -delete
 sync
 for file in "$repo_dir"/askterminal.koplugin/*.lua; do
   cmp -s "$file" "$plugin_dir/$(basename "$file")" || { echo "Verification failed for $(basename "$file"). Run the script again." >&2; exit 1; }
