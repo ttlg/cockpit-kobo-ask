@@ -127,7 +127,7 @@ The plugin shows English or Japanese, following KOReader's language setting (**S
 
 ## Troubleshooting
 
-- **No Asks appear**: check the relay log. If it shows no requests from the Kobo, make sure KOReader is running and Wi-Fi is connected, then choose **受信箱を開く** to see the error message.
+- **No Asks appear**: check the relay log. If it shows no requests from the Kobo, make sure KOReader is running and Wi-Fi is connected, then choose **Open inbox** to see the error message.
 - **The Mac's IP changed**: rerun `scripts/install-kobo.sh`, or change the URL from the Cockpit Ask menu.
 - **Changes do not show up**: restart KOReader after copying a new plugin. KOReader loads plugins only at startup.
 
