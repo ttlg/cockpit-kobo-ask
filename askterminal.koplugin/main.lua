@@ -1,3 +1,4 @@
+local Event = require("ui/event")
 local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local NetworkMgr = require("ui/network/manager")
@@ -12,6 +13,24 @@ local socket = require("socket")
 local socketutil = require("socketutil")
 
 local SETTINGS_KEY = "askterminal"
+local MOVABLE_HANDLERS = {
+    "onMovableSwipe",
+    "onMovableTouch",
+    "onMovableHold",
+    "onMovableHoldPan",
+    "onMovableHoldRelease",
+    "onMovablePan",
+    "onMovablePanRelease",
+}
+
+local FixedTextViewer = TextViewer:extend{}
+
+function FixedTextViewer:init(...)
+    TextViewer.init(self, ...)
+    for _, handler in ipairs(MOVABLE_HANDLERS) do
+        self.movable[handler] = function() return false end
+    end
+end
 local SEPARATOR = "――――――――"
 
 local AskTerminal = WidgetContainer:extend{
@@ -72,6 +91,10 @@ function AskTerminal:addToMainMenu(menu_items)
             {
                 text = "受信箱を開く",
                 callback = function() self:poll({ manual = true }) end,
+            },
+            {
+                text = "Kobo のホームに戻る",
+                callback = function() UIManager:broadcastEvent(Event:new("Exit")) end,
             },
             {
                 text = "サーバー URL を変更",
@@ -379,7 +402,7 @@ function AskTerminal:render()
     table.insert(rows, self:navigationRow(index))
     local refresh = self.viewer and "ui" or "full"
     self:closeViewer()
-    self.viewer = TextViewer:new{
+    self.viewer = FixedTextViewer:new{
         title = ask.heading,
         text = self:bodyText({ ask = ask, index = index }),
         buttons_table = rows,
