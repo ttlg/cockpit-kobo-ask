@@ -42,12 +42,28 @@ const (
 	accentDanger
 )
 
+type iconKind int
+
+const (
+	iconNone iconKind = iota
+	iconRadio
+	iconCheckbox
+	iconEdit
+)
+
+const (
+	iconSize = 40
+	iconGap  = 20
+)
+
 type hitArea struct {
 	rect   image.Rectangle
 	action func()
 }
 
 type buttonSpec struct {
+	icon        iconKind
+	iconOn      bool
 	label       string
 	description string
 	accent      accent
@@ -55,6 +71,7 @@ type buttonSpec struct {
 	plain       bool
 	bold        bool
 	centered    bool
+	weight      int
 	action      func()
 }
 
@@ -146,7 +163,7 @@ func (l *layout) separator() {
 func measureButton(args measureButtonArgs) (int, []string, []string) {
 	labelFace := args.fonts.face(fontKey{bold: args.spec.bold, size: sizeButton})
 	descriptionFace := args.fonts.face(fontKey{size: sizeDescription})
-	inner := args.width - 2*buttonPadding
+	inner := args.width - 2*buttonPadding - iconWidth(args.spec)
 	labelLines := wrapText(wrapArgs{text: args.spec.label, face: labelFace, width: inner})
 	descriptionLines := []string{}
 	if args.spec.description != "" {
@@ -172,8 +189,13 @@ func drawButton(args drawButtonArgs) {
 	labelFace := args.fonts.face(fontKey{bold: args.spec.bold, size: sizeButton})
 	contentHeight := len(args.labelLines)*lineHeight(sizeButton) + len(args.descriptionLines)*lineHeight(sizeDescription)
 	y := args.rect.Min.Y + (args.rect.Dy()-contentHeight)/2
+	if args.spec.icon != iconNone {
+		iconTop := y + (lineHeight(sizeButton)-iconSize)/2
+		drawIcon(drawIconArgs{target: args.target, kind: args.spec.icon, on: args.spec.iconOn, rect: image.Rect(args.rect.Min.X+buttonPadding, iconTop, args.rect.Min.X+buttonPadding+iconSize, iconTop+iconSize), color: foreground})
+	}
+	textLeft := args.rect.Min.X + buttonPadding + iconWidth(args.spec)
 	for _, line := range args.labelLines {
-		x := args.rect.Min.X + buttonPadding
+		x := textLeft
 		if args.spec.centered {
 			x = args.rect.Min.X + (args.rect.Dx()-measureWidth(measureWidthArgs{face: labelFace, text: line}))/2
 		}
@@ -184,7 +206,7 @@ func drawButton(args drawButtonArgs) {
 	if args.spec.disabled {
 		descriptionColor = colorLightGray
 	}
-	drawLines(drawLinesArgs{target: args.target, fonts: args.fonts, style: textStyle{size: sizeDescription, color: descriptionColor}, lines: args.descriptionLines, x: args.rect.Min.X + buttonPadding, y: y})
+	drawLines(drawLinesArgs{target: args.target, fonts: args.fonts, style: textStyle{size: sizeDescription, color: descriptionColor}, lines: args.descriptionLines, x: textLeft, y: y})
 }
 
 type drawButtonArgs struct {
@@ -224,4 +246,77 @@ func measureWidth(args measureWidthArgs) int {
 type measureWidthArgs struct {
 	face font.Face
 	text string
+}
+
+func iconWidth(spec buttonSpec) int {
+	if spec.icon == iconNone {
+		return 0
+	}
+	return iconSize + iconGap
+}
+
+func fillCircle(args circleArgs) {
+	radiusSquared := args.radius * args.radius
+	for y := -args.radius; y <= args.radius; y++ {
+		for x := -args.radius; x <= args.radius; x++ {
+			if x*x+y*y <= radiusSquared {
+				args.target.Set(args.center.X+x, args.center.Y+y, args.color)
+			}
+		}
+	}
+}
+
+type circleArgs struct {
+	target *image.RGBA
+	center image.Point
+	radius int
+	color  color.Color
+}
+
+func drawThickLine(args lineArgs) {
+	steps := max(abs(args.to.X-args.from.X), abs(args.to.Y-args.from.Y), 1)
+	for step := 0; step <= steps; step++ {
+		point := image.Point{args.from.X + (args.to.X-args.from.X)*step/steps, args.from.Y + (args.to.Y-args.from.Y)*step/steps}
+		fillCircle(circleArgs{target: args.target, center: point, radius: args.width / 2, color: args.color})
+	}
+}
+
+type lineArgs struct {
+	target *image.RGBA
+	from   image.Point
+	to     image.Point
+	width  int
+	color  color.Color
+}
+
+func drawIcon(args drawIconArgs) {
+	r := args.rect
+	center := image.Point{(r.Min.X + r.Max.X) / 2, (r.Min.Y + r.Max.Y) / 2}
+	switch args.kind {
+	case iconRadio:
+		fillCircle(circleArgs{target: args.target, center: center, radius: iconSize / 2, color: args.color})
+		fillCircle(circleArgs{target: args.target, center: center, radius: iconSize/2 - 4, color: colorWhite})
+		if args.on {
+			fillCircle(circleArgs{target: args.target, center: center, radius: iconSize/2 - 10, color: args.color})
+		}
+	case iconCheckbox:
+		strokeRect(strokeArgs{target: args.target, rect: r, width: 4, color: args.color})
+		if args.on {
+			fillRect(fillArgs{target: args.target, rect: r, color: args.color})
+			drawThickLine(lineArgs{target: args.target, from: image.Point{r.Min.X + 8, center.Y + 1}, to: image.Point{r.Min.X + 16, r.Max.Y - 10}, width: 6, color: colorWhite})
+			drawThickLine(lineArgs{target: args.target, from: image.Point{r.Min.X + 16, r.Max.Y - 10}, to: image.Point{r.Max.X - 7, r.Min.Y + 9}, width: 6, color: colorWhite})
+		}
+	case iconEdit:
+		drawThickLine(lineArgs{target: args.target, from: image.Point{r.Min.X + 10, r.Max.Y - 10}, to: image.Point{r.Max.X - 6, r.Min.Y + 6}, width: 8, color: args.color})
+		drawThickLine(lineArgs{target: args.target, from: image.Point{r.Min.X + 4, r.Max.Y - 4}, to: image.Point{r.Min.X + 10, r.Max.Y - 10}, width: 4, color: args.color})
+		fillRect(fillArgs{target: args.target, rect: image.Rect(r.Min.X+16, r.Max.Y-3, r.Max.X, r.Max.Y), color: args.color})
+	}
+}
+
+type drawIconArgs struct {
+	target *image.RGBA
+	kind   iconKind
+	on     bool
+	rect   image.Rectangle
+	color  color.Color
 }

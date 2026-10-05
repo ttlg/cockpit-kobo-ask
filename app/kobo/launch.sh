@@ -20,6 +20,7 @@ resume() {
   for name in hindenburg sickel nickel; do
     pid=$(pidof "$name") && kill -CONT $pid
   done
+  cp "$RUNTIME/launch.log" "$SOURCE/last-run.log"
 }
 trap resume EXIT INT TERM
 for name in nickel sickel hindenburg; do

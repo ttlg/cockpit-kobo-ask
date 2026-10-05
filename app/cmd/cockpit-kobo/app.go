@@ -161,7 +161,7 @@ func (a *app) buildContent(width int) *layout {
 		l.gap(8)
 		l.text(layoutTextArgs{text: a.tr.text("whole_description"), style: textStyle{size: sizeNote, color: colorGray}})
 		l.gap(14)
-		l.button(buttonSpec{label: inputLabel(inputLabelArgs{text: d.whole, placeholder: a.tr.text("whole_placeholder")}), action: func() { a.openEditor(editorTarget{askID: item.ID, questionIndex: -1}) }})
+		l.button(buttonSpec{icon: iconEdit, label: inputLabel(inputLabelArgs{text: d.whole, placeholder: a.tr.text("whole_placeholder")}), action: func() { a.openEditor(editorTarget{askID: item.ID, questionIndex: -1}) }})
 	}
 	if requiresSubmit(item) {
 		summary := describeSubmission(submissionArgs{ask: item, draft: d})
@@ -210,15 +210,11 @@ func (a *app) questionBlock(args questionBlockArgs) {
 	for choiceIndex, choice := range args.question.Choices {
 		number := choiceIndex + 1
 		selected := slices.Contains(args.draft.choices[args.questionIndex], number)
-		label := choice
-		if !tapToSend {
-			label = choiceMark(choiceMarkArgs{multiple: args.question.Multiple, selected: selected}) + choice
-		}
 		description := ""
 		if choiceIndex < len(args.question.ChoiceDescriptions) {
 			description = args.question.ChoiceDescriptions[choiceIndex]
 		}
-		spec := buttonSpec{label: label, description: description, action: func() {
+		spec := buttonSpec{label: choice, description: description, iconOn: selected, icon: choiceIcon(choiceIconArgs{tapToSend: tapToSend, multiple: args.question.Multiple}), action: func() {
 			a.onChoice(onChoiceArgs{ask: args.ask, questionIndex: args.questionIndex, choiceIndex: number})
 		}}
 		if selected {
@@ -228,39 +224,37 @@ func (a *app) questionBlock(args questionBlockArgs) {
 		l.gap(12)
 	}
 	if args.question.AllowInput {
-		l.button(buttonSpec{label: inputLabel(inputLabelArgs{text: args.draft.inputs[args.questionIndex], placeholder: a.tr.text("input_placeholder")}), action: func() {
+		l.button(buttonSpec{icon: iconEdit, label: inputLabel(inputLabelArgs{text: args.draft.inputs[args.questionIndex], placeholder: a.tr.text("input_placeholder")}), action: func() {
 			a.openEditor(editorTarget{askID: args.ask.ID, questionIndex: args.questionIndex})
 		}})
 	}
 }
 
-func choiceMark(args choiceMarkArgs) string {
+func choiceIcon(args choiceIconArgs) iconKind {
 	switch {
-	case args.multiple && args.selected:
-		return "☑ "
+	case args.tapToSend:
+		return iconNone
 	case args.multiple:
-		return "☐ "
-	case args.selected:
-		return "● "
+		return iconCheckbox
 	}
-	return "○ "
+	return iconRadio
 }
 
-type choiceMarkArgs struct {
-	multiple bool
-	selected bool
+type choiceIconArgs struct {
+	tapToSend bool
+	multiple  bool
 }
 
 func inputLabel(args inputLabelArgs) string {
 	text := strings.Join(strings.Fields(args.text), " ")
 	if text == "" {
-		return "✎ " + args.placeholder
+		return args.placeholder
 	}
 	runes := []rune(text)
 	if len(runes) > 60 {
 		text = string(runes[:60]) + "…"
 	}
-	return "✎ " + text
+	return text
 }
 
 type inputLabelArgs struct {
@@ -285,10 +279,10 @@ func (a *app) footerRows() [][]buttonSpec {
 			count = a.tr.text("queue", "count", strconv.Itoa(len(a.asks)))
 		}
 		rows = append(rows, []buttonSpec{
-			{label: a.tr.text("close"), centered: true, accent: accentDanger, disabled: a.busy, action: func() { a.closeAsk(item) }},
-			{label: a.tr.text("previous"), centered: true, disabled: index == 0, action: func() { a.move(-1) }},
-			{label: count, centered: true, plain: true, disabled: true},
-			{label: a.tr.text("next"), centered: true, disabled: index >= len(a.asks)-1, action: func() { a.move(1) }},
+			{label: a.tr.text("close"), weight: 2, centered: true, accent: accentDanger, disabled: a.busy, action: func() { a.closeAsk(item) }},
+			{label: a.tr.text("previous"), weight: 2, centered: true, disabled: index == 0, action: func() { a.move(-1) }},
+			{label: count, weight: 3, centered: true, plain: true, disabled: true},
+			{label: a.tr.text("next"), weight: 2, centered: true, disabled: index >= len(a.asks)-1, action: func() { a.move(1) }},
 		})
 	}
 	rows = append(rows, []buttonSpec{{label: a.tr.text("kobo_home"), centered: true, action: a.quit}})
@@ -319,7 +313,7 @@ func (a *app) renderMain() *image.RGBA {
 		y += rowHeight + footerGap
 	}
 	a.viewport = image.Rect(margin, headerHeight, a.width()-margin, footerTop-3)
-	l := a.buildContent(a.viewport.Dx() - 16)
+	l := a.buildContent(a.viewport.Dx())
 	a.content = l.render()
 	maxScroll := max(a.content.Bounds().Dy()-a.viewport.Dy(), 0)
 	a.scroll = min(max(a.scroll, 0), maxScroll)
@@ -342,15 +336,24 @@ func (a *app) renderMain() *image.RGBA {
 
 func (a *app) drawRow(args drawRowArgs) {
 	gap := 12
-	width := (a.width() - 2*margin - gap*(len(args.row)-1)) / len(args.row)
+	totalWeight := 0
+	for _, spec := range args.row {
+		totalWeight += max(spec.weight, 1)
+	}
+	available := a.width() - 2*margin - gap*(len(args.row)-1)
+	left := margin
 	for index, spec := range args.row {
-		left := margin + index*(width+gap)
+		width := available * max(spec.weight, 1) / totalWeight
+		if index == len(args.row)-1 {
+			width = a.width() - margin - left
+		}
 		rect := image.Rect(left, args.top, left+width, args.top+rowHeight)
 		_, labelLines, _ := measureButton(measureButtonArgs{fonts: a.fonts, spec: spec, width: width, minHeight: rowHeight})
 		drawButton(drawButtonArgs{target: args.target, fonts: a.fonts, spec: spec, rect: rect, labelLines: labelLines[:min(len(labelLines), 2)]})
 		if !spec.disabled && spec.action != nil {
 			a.hits = append(a.hits, hitArea{rect: rect, action: spec.action})
 		}
+		left += width + gap
 	}
 }
 
@@ -492,9 +495,8 @@ func (a *app) onKey(key keyPress) {
 		if a.editor == nil {
 			a.scrollBy(-a.viewport.Dy() * 4 / 5)
 		}
-	default:
-		log.Println("key:", key.code)
 	}
+	log.Println("key:", key.code)
 }
 
 func (a *app) poller() {

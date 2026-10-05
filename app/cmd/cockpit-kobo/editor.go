@@ -91,7 +91,7 @@ func characterKeys(characters string) []keySpec {
 }
 
 func (e *editor) rows(tr translator) [][]keySpec {
-	backspace := keySpec{label: "⌫", weight: 3, action: func(e *editor) {
+	backspace := keySpec{label: "←", weight: 3, action: func(e *editor) {
 		if len(e.text) > 0 {
 			e.text = e.text[:len(e.text)-1]
 		}
@@ -155,8 +155,11 @@ func (e *editor) render(a *app) *image.RGBA {
 		}
 		available := a.width() - 2*margin - keyGap*(len(row)-1)
 		x := margin
-		for _, key := range row {
+		for keyIndex, key := range row {
 			width := available * key.weight / totalWeight
+			if keyIndex == len(row)-1 {
+				width = a.width() - margin - x
+			}
 			rect := image.Rect(x, y, x+width, y+keyHeight)
 			spec := buttonSpec{label: key.label, centered: true}
 			_, labelLines, _ := measureButton(measureButtonArgs{fonts: a.fonts, spec: spec, width: width, minHeight: keyHeight})
