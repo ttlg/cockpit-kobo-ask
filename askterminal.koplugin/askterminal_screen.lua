@@ -1,6 +1,5 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local Button = require("ui/widget/button")
-local ButtonTable = require("ui/widget/buttontable")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Font = require("ui/font")
@@ -27,6 +26,20 @@ local FACES = {
     note = Font:getFace("smallinfofont", 17),
 }
 
+local function accentColors()
+    if Screen:isColorEnabled() then
+        return {
+            selected = Blitbuffer.ColorRGB32(0xB8, 0xD8, 0xFF, 0xFF),
+            submit = Blitbuffer.ColorRGB32(0x8C, 0xC0, 0xFF, 0xFF),
+            danger = Blitbuffer.ColorRGB32(0xFF, 0xC4, 0xC4, 0xFF),
+        }
+    end
+    return {
+        selected = Blitbuffer.COLOR_LIGHT_GRAY,
+        submit = Blitbuffer.COLOR_LIGHT_GRAY,
+    }
+end
+
 local AskScreen = InputContainer:extend{
     covers_fullscreen = true,
     title = "",
@@ -38,6 +51,7 @@ local AskScreen = InputContainer:extend{
 
 function AskScreen:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
+    self.accents = accentColors()
     local side = Size.padding.large
     local content_width = self.dimen.w - ScrollableContainer:getScrollbarWidth() - 2 * side
     local title_bar = TitleBar:new{
@@ -50,12 +64,7 @@ function AskScreen:init()
         close_callback = function() self:onClose() end,
         show_parent = self,
     }
-    local footer = ButtonTable:new{
-        width = self.dimen.w - 2 * side,
-        buttons = self.footer_rows,
-        zero_sep = true,
-        show_parent = self,
-    }
+    local footer = self:buildFooter(self.dimen.w - 2 * side)
     local footer_block = VerticalGroup:new{
         align = "center",
         LineWidget:new{ dimen = Geom:new{ w = self.dimen.w, h = Size.line.medium }, background = Blitbuffer.COLOR_GRAY },
@@ -114,17 +123,41 @@ function AskScreen:text(args)
 end
 
 function AskScreen:button(args)
+    local item = args.item
+    local enabled = item.enabled ~= false
     return Button:new{
-        text = args.item.text,
+        text = item.text,
         width = args.width,
-        align = "left",
-        enabled = args.item.enabled ~= false,
-        text_font_bold = args.item.bold == true,
+        align = args.align or "left",
+        enabled = enabled,
+        bordersize = item.plain and 0 or Size.border.button,
+        background = enabled and item.accent and self.accents[item.accent] or nil,
+        text_font_bold = item.bold == true,
         text_font_size = 19,
         radius = Size.radius.button,
-        callback = args.item.callback,
+        callback = item.callback,
         show_parent = self,
     }
+end
+
+function AskScreen:buildFooter(width)
+    local gap = Size.padding.default
+    local footer = VerticalGroup:new{ align = "center" }
+    for row_index, row in ipairs(self.footer_rows) do
+        if row_index > 1 then
+            table.insert(footer, VerticalSpan:new{ width = gap })
+        end
+        local button_width = math.floor((width - (#row - 1) * gap) / #row)
+        local group = HorizontalGroup:new{ align = "center" }
+        for item_index, item in ipairs(row) do
+            if item_index > 1 then
+                table.insert(group, HorizontalSpan:new{ width = gap })
+            end
+            table.insert(group, self:button({ item = item, width = button_width, align = "center" }))
+        end
+        table.insert(footer, group)
+    end
+    return footer
 end
 
 function AskScreen:buildBlock(args)

@@ -436,6 +436,7 @@ function AskTerminal:questionBlock(args)
             kind = "button",
             text = self:choiceLabel({ ask = ask, question_index = args.question_index, choice_index = choice_index, choice = choice }),
             description = question.choiceDescriptions[choice_index],
+            accent = contains(question_draft.choices, choice_index) and "selected" or nil,
             callback = function() self:onChoice({ ask = ask, question_index = args.question_index, choice_index = choice_index }) end,
         })
     end
@@ -549,6 +550,8 @@ function AskTerminal:footerRows(args)
     if self:hasSubmitButton(ask) then
         table.insert(rows, {{
             text = "送信",
+            bold = true,
+            accent = "submit",
             enabled = self:isSubmitReady(ask),
             callback = function() self:submit(ask) end,
         }})
@@ -556,6 +559,7 @@ function AskTerminal:footerRows(args)
     table.insert(rows, {
         {
             text = "閉じる",
+            accent = "danger",
             callback = function() self:closeAsk(ask) end,
         },
         {
@@ -566,6 +570,7 @@ function AskTerminal:footerRows(args)
         {
             text = count > 1 and string.format("%d 件が未処理です", count) or "1 件が未処理です",
             enabled = false,
+            plain = true,
             callback = function() end,
         },
         {
