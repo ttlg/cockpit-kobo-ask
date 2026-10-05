@@ -2,7 +2,6 @@ local Event = require("ui/event")
 local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local NetworkMgr = require("ui/network/manager")
-local TextViewer = require("ui/widget/textviewer")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local http = require("socket.http")
@@ -13,27 +12,10 @@ local socket = require("socket")
 local socketutil = require("socketutil")
 local util = require("util")
 
+local AskScreen = require("askterminal_screen")
+
 local SETTINGS_KEY = "askterminal"
-local SEPARATOR = "――――――――"
 local INPUT_PREVIEW_LENGTH = 24
-local MOVABLE_HANDLERS = {
-    "onMovableSwipe",
-    "onMovableTouch",
-    "onMovableHold",
-    "onMovableHoldPan",
-    "onMovableHoldRelease",
-    "onMovablePan",
-    "onMovablePanRelease",
-}
-
-local FixedTextViewer = TextViewer:extend{}
-
-function FixedTextViewer:init(...)
-    TextViewer.init(self, ...)
-    for _, handler in ipairs(MOVABLE_HANDLERS) do
-        self.movable[handler] = function() return false end
-    end
-end
 
 local function trim(text)
     return (text or ""):match("^%s*(.-)%s*$")
@@ -411,84 +393,116 @@ function AskTerminal:submissionChips(args)
     return chips
 end
 
-function AskTerminal:questionLines(args)
-    local question = args.question
-    local question_draft = args.draft
-    local lines = {}
-    local header = question.title
-    if args.numbered then
-        header = string.format("【%d】%s", args.question_index, question.title)
-    end
-    if question.multiple and #question.choices > 0 then
-        local badge = #question_draft.choices > 0 and string.format("［%d件選択中］", #question_draft.choices) or "［複数選択］"
-        header = header ~= "" and (header .. "  " .. badge) or badge
-    end
-    if header ~= "" then
-        table.insert(lines, header)
-    end
-    for choice_index, choice in ipairs(question.choices) do
-        local description = question.choiceDescriptions[choice_index]
-        if description and description ~= "" then
-            table.insert(lines, string.format("・%s：%s", choice, description))
-        end
-    end
-    if trim(question_draft.input) ~= "" then
-        table.insert(lines, "自由入力：" .. trim(question_draft.input))
-    end
-    return lines
-end
-
-function AskTerminal:bodyText(args)
+function AskTerminal:headerBlock(args)
     local ask = args.ask
-    local draft = self:draftOf(ask)
-    local numbered = #ask.questions > 1
-    local parts = {
-        string.format("%d/%d · %s", args.index, #self.asks, ask.time),
-        ask.summary,
+    local block = {
+        { kind = "text", style = "meta", text = string.format("%d/%d · %s", args.index, #self.asks, ask.time) },
+        { kind = "text", style = "summary", text = ask.summary },
     }
     if ask.mediaCount > 0 then
-        table.insert(parts, string.format("画像や動画が %d 件添付されています。Kobo では表示できないため、Mac で確認してください。", ask.mediaCount))
-    end
-    for question_index, question in ipairs(ask.questions) do
-        local lines = self:questionLines({
-            question = question,
-            draft = draft.questions[question_index],
-            question_index = question_index,
-            numbered = numbered,
+        table.insert(block, {
+            kind = "text",
+            style = "note",
+            text = string.format("画像や動画が %d 件添付されています。Kobo では表示できないため、Mac で確認してください。", ask.mediaCount),
         })
-        if #lines > 0 then
-            table.insert(parts, SEPARATOR)
-            table.insert(parts, table.concat(lines, "\n"))
-        end
     end
-    if numbered then
-        table.insert(parts, SEPARATOR)
-        local whole_lines = { "Ask 全体に回答", "Ask 全体に宛てた回答を書けます。上の各質問への回答と一緒に送信され、空欄の質問は未回答のまま届きます。" }
-        if trim(draft.whole_answer) ~= "" then
-            table.insert(whole_lines, "回答：" .. trim(draft.whole_answer))
-        end
-        table.insert(parts, table.concat(whole_lines, "\n"))
+    return block
+end
+
+function AskTerminal:questionHeader(args)
+    local question = args.question
+    local header = question.title
+    if question.multiple and #question.choices > 0 then
+        local badge = #args.draft.choices > 0 and string.format("［%d件選択中］", #args.draft.choices) or "［複数選択］"
+        header = header ~= "" and (header .. "  " .. badge) or badge
     end
-    if self:requiresSubmit(ask) then
-        local submission = self:submission(ask)
-        if submission.ready then
-            local chips = self:submissionChips({
-                total = submission.total,
-                answered = submission.answered,
-                inputs = submission.inputs,
-                has_whole_answer = submission.has_whole_answer,
-                draft = draft,
-            })
-            table.insert(parts, SEPARATOR)
-            table.insert(parts, "送信する内容：" .. table.concat(chips, " ・ "))
-        elseif numbered then
-            table.insert(parts, SEPARATOR)
-            table.insert(parts, submission.blocked
+    return header
+end
+
+function AskTerminal:questionBlock(args)
+    local ask = args.ask
+    local question = ask.questions[args.question_index]
+    local question_draft = self:draftOf(ask).questions[args.question_index]
+    local block = {}
+    if #ask.questions > 1 then
+        table.insert(block, { kind = "separator" })
+    end
+    local header = self:questionHeader({ question = question, draft = question_draft })
+    if header ~= "" then
+        table.insert(block, { kind = "text", style = "heading", text = header })
+    end
+    for choice_index, choice in ipairs(question.choices) do
+        table.insert(block, {
+            kind = "button",
+            text = self:choiceLabel({ ask = ask, question_index = args.question_index, choice_index = choice_index, choice = choice }),
+            description = question.choiceDescriptions[choice_index],
+            callback = function() self:onChoice({ ask = ask, question_index = args.question_index, choice_index = choice_index }) end,
+        })
+    end
+    if question.allowInput then
+        table.insert(block, {
+            kind = "button",
+            text = self:inputLabel({ input = question_draft.input, placeholder = "自由入力で返答" }),
+            callback = function() self:editAnswerText({ ask = ask, question_index = args.question_index }) end,
+        })
+    end
+    return block
+end
+
+function AskTerminal:wholeAnswerBlock(ask)
+    return {
+        { kind = "separator" },
+        { kind = "text", style = "heading", text = "Ask 全体に回答" },
+        { kind = "text", style = "note", text = "Ask 全体に宛てた回答を書けます。上の各質問への回答と一緒に送信され、空欄の質問は未回答のまま届きます。" },
+        {
+            kind = "button",
+            text = self:inputLabel({ input = self:draftOf(ask).whole_answer, placeholder = "Ask 全体への回答..." }),
+            callback = function() self:editAnswerText({ ask = ask }) end,
+        },
+    }
+end
+
+function AskTerminal:submissionBlock(ask)
+    if not self:requiresSubmit(ask) then
+        return nil
+    end
+    local submission = self:submission(ask)
+    if submission.ready then
+        local chips = self:submissionChips({
+            total = submission.total,
+            answered = submission.answered,
+            inputs = submission.inputs,
+            has_whole_answer = submission.has_whole_answer,
+            draft = self:draftOf(ask),
+        })
+        return {{ kind = "text", style = "note", text = "送信する内容：" .. table.concat(chips, " ・ ") }}
+    end
+    if #ask.questions > 1 then
+        return {{
+            kind = "text",
+            style = "note",
+            text = submission.blocked
                 and "添付がある質問には選択が必要です。選択肢を選ぶか、添付を削除してください。"
-                or "すべての質問に答えるか、Ask 全体への回答を書いてください。")
-        end
+                or "すべての質問に答えるか、Ask 全体への回答を書いてください。",
+        }}
     end
-    return table.concat(parts, "\n\n")
+    return nil
+end
+
+function AskTerminal:blocks(args)
+    local ask = args.ask
+    local blocks = { self:headerBlock(args) }
+    for question_index in ipairs(ask.questions) do
+        table.insert(blocks, self:questionBlock({ ask = ask, question_index = question_index }))
+    end
+    if #ask.questions > 1 then
+        table.insert(blocks, self:wholeAnswerBlock(ask))
+    end
+    local submission_block = self:submissionBlock(ask)
+    if submission_block then
+        table.insert(blocks, submission_block)
+    end
+    return blocks
 end
 
 function AskTerminal:choiceLabel(args)
@@ -496,7 +510,6 @@ function AskTerminal:choiceLabel(args)
         return args.choice
     end
     local question = args.ask.questions[args.question_index]
-    local prefix = #args.ask.questions > 1 and string.format("【%d】", args.question_index) or ""
     local is_selected = contains(self:draftOf(args.ask).questions[args.question_index].choices, args.choice_index)
     local mark
     if question.multiple then
@@ -504,71 +517,46 @@ function AskTerminal:choiceLabel(args)
     else
         mark = is_selected and "● " or "○ "
     end
-    return mark .. prefix .. args.choice
+    return mark .. args.choice
 end
 
 function AskTerminal:inputLabel(args)
-    local prefix = args.numbered and string.format("【%d】", args.question_index) or ""
     local text = trim(args.input)
     if text == "" then
-        return "✎ " .. prefix .. args.placeholder
+        return "✎ " .. args.placeholder
     end
-    return "✎ " .. prefix .. preview(text)
+    return "✎ " .. preview(text)
 end
 
-function AskTerminal:answerRows(ask)
+function AskTerminal:hasSubmitButton(ask)
+    if self:requiresSubmit(ask) then
+        return true
+    end
+    return #ask.questions[1].choices == 0
+end
+
+function AskTerminal:isSubmitReady(ask)
+    if self:requiresSubmit(ask) then
+        return self:submission(ask).ready
+    end
+    return trim(self:draftOf(ask).questions[1].input) ~= ""
+end
+
+function AskTerminal:footerRows(args)
+    local ask = args.ask
+    local count = #self.asks
     local rows = {}
-    local draft = self:draftOf(ask)
-    local numbered = #ask.questions > 1
-    local has_text_only_question = false
-    for question_index, question in ipairs(ask.questions) do
-        for choice_index, choice in ipairs(question.choices) do
-            table.insert(rows, {{
-                text = self:choiceLabel({ ask = ask, question_index = question_index, choice_index = choice_index, choice = choice }),
-                align = "left",
-                callback = function() self:onChoice({ ask = ask, question_index = question_index, choice_index = choice_index }) end,
-            }})
-        end
-        if #question.choices == 0 then
-            has_text_only_question = true
-        end
-        if question.allowInput then
-            table.insert(rows, {{
-                text = self:inputLabel({
-                    input = draft.questions[question_index].input,
-                    placeholder = "自由入力で返答",
-                    question_index = question_index,
-                    numbered = numbered,
-                }),
-                align = "left",
-                callback = function() self:editAnswerText({ ask = ask, question_index = question_index }) end,
-            }})
-        end
-    end
-    if numbered then
-        table.insert(rows, {{
-            text = self:inputLabel({ input = draft.whole_answer, placeholder = "Ask 全体への回答...", numbered = false }),
-            align = "left",
-            callback = function() self:editAnswerText({ ask = ask }) end,
-        }})
-    end
-    if self:requiresSubmit(ask) or has_text_only_question then
-        local ready = self:requiresSubmit(ask) and self:submission(ask).ready or trim(draft.questions[1].input) ~= ""
+    if self:hasSubmitButton(ask) then
         table.insert(rows, {{
             text = "送信",
-            enabled = ready,
+            enabled = self:isSubmitReady(ask),
             callback = function() self:submit(ask) end,
         }})
     end
-    return rows
-end
-
-function AskTerminal:footerRow(args)
-    local count = #self.asks
-    return {
+    table.insert(rows, {
         {
             text = "閉じる",
-            callback = function() self:closeAsk(args.ask) end,
+            callback = function() self:closeAsk(ask) end,
         },
         {
             text = "◀ 前へ",
@@ -585,7 +573,12 @@ function AskTerminal:footerRow(args)
             enabled = args.index < count,
             callback = function() self:move(1) end,
         },
-    }
+    })
+    table.insert(rows, {{
+        text = "Kobo のホームに戻る",
+        callback = function() self:exitToKoboHome() end,
+    }})
+    return rows
 end
 
 function AskTerminal:exitToKoboHome()
@@ -595,22 +588,20 @@ end
 
 function AskTerminal:render()
     local ask, index = self:currentAsk()
-    local rows = self:answerRows(ask)
-    table.insert(rows, self:footerRow({ ask = ask, index = index }))
-    table.insert(rows, {{
-        text = "Kobo のホームに戻る",
-        callback = function() self:exitToKoboHome() end,
-    }})
-    local refresh = self.viewer and "ui" or "full"
-    self:closeViewer()
-    self.viewer = FixedTextViewer:new{
+    local previous = self.viewer
+    local scroll_offset = previous and previous.ask_id == ask.id and previous:getScrollOffset() or nil
+    self.viewer = AskScreen:new{
         title = ask.heading,
-        text = self:bodyText({ ask = ask, index = index }),
-        buttons_table = rows,
-        add_default_buttons = false,
+        blocks = self:blocks({ ask = ask, index = index }),
+        footer_rows = self:footerRows({ ask = ask, index = index }),
+        scroll_offset = scroll_offset,
         close_callback = function() self:onViewerClosedByUser() end,
     }
-    UIManager:show(self.viewer, refresh)
+    self.viewer.ask_id = ask.id
+    UIManager:show(self.viewer, previous and "ui" or "full")
+    if previous then
+        UIManager:close(previous)
+    end
 end
 
 function AskTerminal:onViewerClosedByUser()
