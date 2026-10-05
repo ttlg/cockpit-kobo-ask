@@ -2,7 +2,12 @@
 
 Answer [AGI Cockpit](https://agi-labo.com/tools/cockpit) Asks from a Kobo e-reader.
 
-A KOReader plugin shows open Asks full screen on the Kobo, and a small relay on the Mac forwards your answers to Cockpit through the `cockpit` CLI. The Ask screen follows the Cockpit PWA inbox: free-form input on every question, an explicit Send button, a whole-Ask answer for multi-question Asks, previous/next navigation, and Close.
+A small relay on the Mac forwards your answers to Cockpit through the `cockpit` CLI. On the Kobo, you can use either of two clients:
+
+- **Native app** (`app/`): a standalone Go app launched from NickelMenu as **AGI Cockpit**. It draws directly to the e-ink screen, so it is fast and does not need KOReader's interface.
+- **KOReader plugin** (`askterminal.koplugin/`): runs inside KOReader.
+
+Both follow the Cockpit PWA inbox: free-form input on every question, an explicit Send button, a whole-Ask answer for multi-question Asks, previous/next navigation, and Close.
 
 Tested with a Kobo Libra Colour (firmware 4.45), KOReader v2026.07.1, NickelMenu v0.6.0, Node.js 24, and macOS.
 
@@ -103,7 +108,26 @@ Unplug the Kobo and open KOReader from the NickelMenu item. If KOReader was alre
 - **Settings → Network**: turn on **Wi-Fi connection**, turn off **Disable Wi-Fi connection when inactive**, and turn on **Restore Wi-Fi connection on resume**.
 - **Settings → Device**: turn off autosuspend while the Kobo runs on USB power. Polling stops while the Kobo sleeps.
 
-## Usage
+### Native app (optional, instead of step 4)
+
+The native app needs NickelMenu (step 1) and an FBInk binary. The install script copies the FBInk build bundled with KOReader, so keep KOReader installed or pass `--fbink <path>`.
+
+```bash
+scripts/build-app.sh
+scripts/install-app.sh --language en
+```
+
+`build-app.sh` downloads Noto Sans JP into `app/fonts/` and cross-compiles `app/build/cockpit-kobo` for ARM Linux. `install-app.sh` copies the app to `.adds/cockpit/` on the Kobo, writes its `config.json`, and adds **AGI Cockpit** to NickelMenu. Restart the Kobo if the menu item does not appear.
+
+When you open **AGI Cockpit**, it connects Wi-Fi, pauses the stock Kobo software, and takes over the screen. Tap **Return to Kobo home** or press the power button to exit; the stock software resumes where it was. While the app runs, the Kobo does not sleep, so keep it on USB power for long sessions. Swipe or use the page-turn buttons to scroll, and use the on-screen English keyboard for free-text answers.
+
+Tested on a Kobo Libra Colour (1264×1680, touch axes swapped and mirrored). Other models may need different `touch` settings in `config.json`:
+
+```json
+{ "touch": { "device": "/dev/input/event1", "swapAxes": true, "mirrorX": false, "mirrorY": true } }
+```
+
+## Usage (KOReader plugin)
 
 Open the menu by tapping the top edge of the screen, then go to **Tools → Cockpit Ask**:
 
