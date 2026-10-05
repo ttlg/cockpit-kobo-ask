@@ -14,7 +14,9 @@ type CockpitQuestion = {
 
 type CockpitAsk = {
   id: string;
-  title?: string;
+  title: string | null;
+  directory: string | null;
+  createdAt: string;
   summary: string;
   choices: string[];
   multiple: boolean;
@@ -33,7 +35,8 @@ type TerminalQuestion = {
 
 type TerminalAsk = {
   id: string;
-  title: string;
+  heading: string;
+  time: string;
   summary: string;
   answerable: boolean;
   unanswerableReason: string | null;
@@ -94,12 +97,28 @@ const unanswerableReasonOf = ({ ask, questions }: { ask: CockpitAsk; questions: 
   return null;
 };
 
+const headingOf = (ask: CockpitAsk): string => {
+  const title = ask.title || "確認リクエスト";
+  const directoryLabel = ask.directory?.split(/[\\/]/).filter(Boolean).at(-1);
+  return directoryLabel ? `${title} (${directoryLabel})` : title;
+};
+
+const timeOf = (createdAt: string): string => {
+  const date = new Date(createdAt);
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+const byCreatedAt = (left: CockpitAsk, right: CockpitAsk): number =>
+  left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+
 const toTerminalAsk = (ask: CockpitAsk): TerminalAsk => {
   const questions = toTerminalQuestions(ask);
   const unanswerableReason = unanswerableReasonOf({ ask, questions });
   return {
     id: ask.id,
-    title: ask.title ?? "",
+    heading: headingOf(ask),
+    time: timeOf(ask.createdAt),
     summary: toPlainText(ask.summary),
     answerable: unanswerableReason === null,
     unanswerableReason,
@@ -162,7 +181,7 @@ const parseJson = (text: string): unknown => {
 const listAsks = async (response: ServerResponse): Promise<void> => {
   const result = await runCockpit<{ asks: CockpitAsk[] }>(["ask", "list"]);
   if (!result.ok) return sendJson({ response, status: 502, body: { ok: false, error: result.error } });
-  sendJson({ response, status: 200, body: { ok: true, asks: result.data.asks.map(toTerminalAsk) } });
+  sendJson({ response, status: 200, body: { ok: true, asks: [...result.data.asks].sort(byCreatedAt).map(toTerminalAsk) } });
 };
 
 const answerAsk = async ({ request, response, askId }: { request: IncomingMessage; response: ServerResponse; askId: string }): Promise<void> => {

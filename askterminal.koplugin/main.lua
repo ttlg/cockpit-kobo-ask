@@ -12,6 +12,7 @@ local socket = require("socket")
 local socketutil = require("socketutil")
 
 local SETTINGS_KEY = "askterminal"
+local SEPARATOR = "――――――――"
 
 local AskTerminal = WidgetContainer:extend{
     name = "askterminal",
@@ -21,8 +22,12 @@ local AskTerminal = WidgetContainer:extend{
 function AskTerminal:init()
     self.settings = G_reader_settings:readSetting(SETTINGS_KEY) or {}
     self.defaults = self:loadDefaults()
-    self.skipped = {}
+    self.asks = {}
+    self.current_id = nil
+    self.drafts = {}
+    self.hidden_ids = {}
     self.viewer = nil
+    self.submitting = false
     self.poll_task = function() self:poll() end
     self.ui.menu:registerToMainMenu(self)
     if self:setting("enabled") then
@@ -65,7 +70,7 @@ function AskTerminal:addToMainMenu(menu_items)
                 callback = function() self:setEnabled(not self:setting("enabled")) end,
             },
             {
-                text = "今すぐ確認",
+                text = "受信箱を開く",
                 callback = function() self:poll({ manual = true }) end,
             },
             {
@@ -114,6 +119,7 @@ function AskTerminal:setEnabled(enabled)
         self:poll({ manual = true })
         return
     end
+    self:closeViewer()
     UIManager:show(InfoMessage:new{ text = "Ask の受け取りを止めました。", timeout = 2 })
 end
 
@@ -152,16 +158,59 @@ function AskTerminal:request(args)
     return nil, "中継サーバーにつながりません（" .. tostring(code) .. "）。"
 end
 
-function AskTerminal:scheduleNext()
+function AskTerminal:scheduleNext(seconds)
     UIManager:unschedule(self.poll_task)
     if self:setting("enabled") then
-        UIManager:scheduleIn(self:interval(), self.poll_task)
+        UIManager:scheduleIn(seconds or self:interval(), self.poll_task)
     end
+end
+
+function AskTerminal:indexOf(id)
+    for index, ask in ipairs(self.asks) do
+        if ask.id == id then
+            return index
+        end
+    end
+    return nil
+end
+
+function AskTerminal:idsKey(asks)
+    local ids = {}
+    for _, ask in ipairs(asks) do
+        table.insert(ids, ask.id)
+    end
+    return table.concat(ids, ",")
+end
+
+function AskTerminal:pruneState()
+    local open = {}
+    for _, ask in ipairs(self.asks) do
+        open[ask.id] = true
+    end
+    for id in pairs(self.drafts) do
+        if not open[id] then
+            self.drafts[id] = nil
+        end
+    end
+    for id in pairs(self.hidden_ids) do
+        if not open[id] then
+            self.hidden_ids[id] = nil
+        end
+    end
+end
+
+function AskTerminal:firstUnhiddenId()
+    for _, ask in ipairs(self.asks) do
+        if not self.hidden_ids[ask.id] then
+            return ask.id
+        end
+    end
+    return nil
 end
 
 function AskTerminal:poll(options)
     local manual = options and options.manual
-    if self.viewer then
+    if self.submitting then
         return self:scheduleNext()
     end
     if not NetworkMgr:isConnected() then
@@ -177,93 +226,174 @@ function AskTerminal:poll(options)
         end
         return self:scheduleNext()
     end
-    local open = {}
-    for _, ask in ipairs(response.asks or {}) do
-        open[ask.id] = true
-    end
-    for id in pairs(self.skipped) do
-        if not open[id] then
-            self.skipped[id] = nil
-        end
-    end
-    for _, ask in ipairs(response.asks or {}) do
-        if not self.skipped[ask.id] or manual then
-            self.skipped[ask.id] = nil
-            self:startAsk(ask)
-            return self:scheduleNext()
-        end
-    end
-    if manual then
-        UIManager:show(InfoMessage:new{ text = "未回答の Ask はありません。", timeout = 2 })
-    end
+    local previous_key = self:idsKey(self.asks)
+    self.asks = response.asks or {}
+    self:pruneState()
+    self:updateView({ manual = manual, changed = previous_key ~= self:idsKey(self.asks) })
     self:scheduleNext()
 end
 
-function AskTerminal:startAsk(ask)
-    self:showQuestion({ ask = ask, index = 1, answers = {}, selected = {} })
+function AskTerminal:updateView(args)
+    if #self.asks == 0 then
+        self:closeViewer()
+        if args.manual then
+            UIManager:show(InfoMessage:new{ text = "未読はありません。", timeout = 2 })
+        end
+        return
+    end
+    if self.viewer then
+        if args.changed then
+            self:render()
+        end
+        return
+    end
+    if args.manual then
+        self.current_id = self.asks[1].id
+        return self:render()
+    end
+    local unhidden_id = self:firstUnhiddenId()
+    if unhidden_id then
+        self.current_id = unhidden_id
+        self:render()
+    end
 end
 
-function AskTerminal:questionText(state)
-    local question = state.ask.questions[state.index]
-    local parts = { state.ask.summary }
-    if #state.ask.questions > 1 then
-        table.insert(parts, "――――――――")
-        table.insert(parts, string.format("質問 %d / %d", state.index, #state.ask.questions))
+function AskTerminal:currentAsk()
+    local index = self:indexOf(self.current_id)
+    if not index then
+        index = 1
+        self.current_id = self.asks[1].id
     end
-    if question and question.summary ~= "" then
-        table.insert(parts, question.summary)
+    return self.asks[index], index
+end
+
+function AskTerminal:draftOf(ask)
+    if not self.drafts[ask.id] then
+        local selected = {}
+        for question_index in ipairs(ask.questions) do
+            selected[question_index] = {}
+        end
+        self.drafts[ask.id] = { selected = selected }
     end
-    if not state.ask.answerable then
-        table.insert(parts, "――――――――")
-        table.insert(parts, state.ask.unanswerableReason)
+    return self.drafts[ask.id]
+end
+
+function AskTerminal:isSimple(ask)
+    return #ask.questions == 1 and not ask.questions[1].multiple
+end
+
+function AskTerminal:isReady(ask)
+    local draft = self:draftOf(ask)
+    for question_index in ipairs(ask.questions) do
+        if next(draft.selected[question_index]) == nil then
+            return false
+        end
+    end
+    return true
+end
+
+function AskTerminal:bodyText(args)
+    local ask = args.ask
+    local parts = {
+        string.format("%d/%d · %s", args.index, #self.asks, ask.time),
+        ask.summary,
+    }
+    if #ask.questions > 1 then
+        for question_index, question in ipairs(ask.questions) do
+            table.insert(parts, SEPARATOR)
+            table.insert(parts, string.format("【%d】%s", question_index, question.summary))
+        end
+    elseif ask.questions[1] and ask.questions[1].summary ~= "" then
+        table.insert(parts, ask.questions[1].summary)
+    end
+    if not ask.answerable then
+        table.insert(parts, SEPARATOR)
+        table.insert(parts, ask.unanswerableReason)
     end
     return table.concat(parts, "\n\n")
 end
 
-function AskTerminal:choiceButtons(state)
-    local question = state.ask.questions[state.index]
+function AskTerminal:choiceLabel(args)
+    if self:isSimple(args.ask) then
+        return args.choice
+    end
+    local question = args.ask.questions[args.question_index]
+    local prefix = #args.ask.questions > 1 and string.format("【%d】", args.question_index) or ""
+    local selected = self:draftOf(args.ask).selected[args.question_index][args.choice_index]
+    local mark
+    if question.multiple then
+        mark = selected and "☑ " or "☐ "
+    else
+        mark = selected and "● " or "○ "
+    end
+    return mark .. prefix .. args.choice
+end
+
+function AskTerminal:answerRows(ask)
     local rows = {}
-    if not state.ask.answerable then
+    if not ask.answerable then
         return rows
     end
-    for choice_index, choice in ipairs(question.choices) do
-        local label = choice
-        if question.multiple then
-            label = (state.selected[choice_index] and "☑ " or "☐ ") .. choice
+    for question_index, question in ipairs(ask.questions) do
+        for choice_index, choice in ipairs(question.choices) do
+            table.insert(rows, {{
+                text = self:choiceLabel({ ask = ask, question_index = question_index, choice_index = choice_index, choice = choice }),
+                callback = function() self:onChoice({ ask = ask, question_index = question_index, choice_index = choice_index }) end,
+            }})
         end
-        table.insert(rows, {{
-            text = label,
-            callback = function() self:onChoice({ state = state, choice_index = choice_index }) end,
-        }})
     end
-    if question.multiple then
+    if not self:isSimple(ask) then
         table.insert(rows, {{
-            text = "決定",
-            callback = function() self:confirmMultiple(state) end,
+            text = "送信",
+            enabled = self:isReady(ask),
+            callback = function() self:submit(ask) end,
         }})
     end
     return rows
 end
 
-function AskTerminal:showQuestion(state)
-    local rows = self:choiceButtons(state)
-    table.insert(rows, {{
-        text = "あとで",
-        callback = function()
-            self.skipped[state.ask.id] = true
-            self:closeViewer()
-        end,
-    }})
-    local title = state.ask.title ~= "" and state.ask.title or "Cockpit Ask"
+function AskTerminal:navigationRow(index)
+    local count = #self.asks
+    return {
+        {
+            text = "◀ 前へ",
+            enabled = index > 1,
+            callback = function() self:move(-1) end,
+        },
+        {
+            text = string.format("%d 件が未処理です", count),
+            enabled = false,
+            callback = function() end,
+        },
+        {
+            text = "次へ ▶",
+            enabled = index < count,
+            callback = function() self:move(1) end,
+        },
+    }
+end
+
+function AskTerminal:render()
+    local ask, index = self:currentAsk()
+    local rows = self:answerRows(ask)
+    table.insert(rows, self:navigationRow(index))
+    local refresh = self.viewer and "ui" or "full"
     self:closeViewer()
     self.viewer = TextViewer:new{
-        title = title,
-        text = self:questionText(state),
+        title = ask.heading,
+        text = self:bodyText({ ask = ask, index = index }),
         buttons_table = rows,
         add_default_buttons = false,
-        close_callback = function() self.viewer = nil end,
+        close_callback = function() self:onViewerClosedByUser() end,
     }
-    UIManager:show(self.viewer, "full")
+    UIManager:show(self.viewer, refresh)
+end
+
+function AskTerminal:onViewerClosedByUser()
+    self.viewer = nil
+    for _, ask in ipairs(self.asks) do
+        self.hidden_ids[ask.id] = true
+    end
 end
 
 function AskTerminal:closeViewer()
@@ -275,53 +405,70 @@ function AskTerminal:closeViewer()
     UIManager:close(viewer)
 end
 
+function AskTerminal:move(step)
+    local _, index = self:currentAsk()
+    local target = self.asks[index + step]
+    if target then
+        self.current_id = target.id
+        self:render()
+    end
+end
+
 function AskTerminal:onChoice(args)
-    local state = args.state
-    local question = state.ask.questions[state.index]
-    if question.multiple then
-        state.selected[args.choice_index] = not state.selected[args.choice_index] or nil
-        return self:showQuestion(state)
+    local ask = args.ask
+    local draft = self:draftOf(ask)
+    if self:isSimple(ask) then
+        draft.selected[1] = { [args.choice_index] = true }
+        return self:submit(ask)
     end
-    self:recordAnswer({ state = state, indexes = { args.choice_index } })
+    local selected = draft.selected[args.question_index]
+    if ask.questions[args.question_index].multiple then
+        selected[args.choice_index] = not selected[args.choice_index] or nil
+    else
+        draft.selected[args.question_index] = { [args.choice_index] = true }
+    end
+    self:render()
 end
 
-function AskTerminal:confirmMultiple(state)
-    local indexes = {}
-    for choice_index in pairs(state.selected) do
-        table.insert(indexes, choice_index)
+function AskTerminal:answerGroups(ask)
+    local draft = self:draftOf(ask)
+    local groups = {}
+    for question_index, question in ipairs(ask.questions) do
+        local indexes = {}
+        for choice_index in pairs(draft.selected[question_index]) do
+            table.insert(indexes, choice_index)
+        end
+        table.sort(indexes)
+        table.insert(groups, {
+            questionId = type(question.id) == "string" and question.id or rapidjson.null,
+            choiceIndexes = rapidjson.array(indexes),
+        })
     end
-    if #indexes == 0 then
-        UIManager:show(InfoMessage:new{ text = "1 つ以上選んでください。", timeout = 2 })
-        return
-    end
-    table.sort(indexes)
-    self:recordAnswer({ state = state, indexes = indexes })
+    return groups
 end
 
-function AskTerminal:recordAnswer(args)
-    local state = args.state
-    local question = state.ask.questions[state.index]
-    table.insert(state.answers, {
-        questionId = type(question.id) == "string" and question.id or rapidjson.null,
-        choiceIndexes = rapidjson.array(args.indexes),
-    })
-    if state.index < #state.ask.questions then
-        return self:showQuestion({ ask = state.ask, index = state.index + 1, answers = state.answers, selected = {} })
-    end
-    self:submit(state)
-end
-
-function AskTerminal:submit(state)
-    local body = rapidjson.encode({ answers = rapidjson.array(state.answers) })
-    local response, err = self:request({ method = "POST", path = "/asks/" .. state.ask.id .. "/answer", body = body })
-    self:closeViewer()
+function AskTerminal:submit(ask)
+    local body = rapidjson.encode({ answers = rapidjson.array(self:answerGroups(ask)) })
+    self.submitting = true
+    local response, err = self:request({ method = "POST", path = "/asks/" .. ask.id .. "/answer", body = body })
+    self.submitting = false
     if not response then
         UIManager:show(InfoMessage:new{ text = "送信できませんでした。\n" .. err, timeout = 4 })
-        return self:scheduleNext()
+        return
+    end
+    local index = self:indexOf(ask.id)
+    if index then
+        table.remove(self.asks, index)
+    end
+    self:pruneState()
+    if #self.asks == 0 then
+        self:closeViewer()
+    else
+        self.current_id = self.asks[1].id
+        self:render()
     end
     UIManager:show(InfoMessage:new{ text = "回答を送信しました。", timeout = 2 })
-    UIManager:unschedule(self.poll_task)
-    UIManager:scheduleIn(3, self.poll_task)
+    self:scheduleNext(3)
 end
 
 function AskTerminal:onCloseWidget()
@@ -335,7 +482,7 @@ end
 
 function AskTerminal:onResume()
     if self:setting("enabled") then
-        UIManager:scheduleIn(5, self.poll_task)
+        self:scheduleNext(5)
     end
 end
 
