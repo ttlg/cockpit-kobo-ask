@@ -234,5 +234,5 @@ createServer((request, response) => {
   });
   route({ request, response }).catch((error: unknown) => sendJson({ response, status: 500, body: { ok: false, error: String(error) } }));
 }).listen(config.port, "0.0.0.0", () => {
-  console.log(`kobo-ask relay listening on :${config.port}`);
+  console.log(`cockpit-kobo-ask relay listening on :${config.port}`);
 });
