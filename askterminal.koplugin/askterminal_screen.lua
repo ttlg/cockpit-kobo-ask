@@ -159,7 +159,7 @@ function AskScreen:onShow()
 end
 
 function AskScreen:onClose()
-    UIManager:close(self)
+    UIManager:close(self, "full")
     if self.close_callback then
         self.close_callback()
     end

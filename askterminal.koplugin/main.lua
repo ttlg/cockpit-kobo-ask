@@ -617,7 +617,7 @@ function AskTerminal:closeViewer()
     end
     local viewer = self.viewer
     self.viewer = nil
-    UIManager:close(viewer)
+    UIManager:close(viewer, "full")
 end
 
 function AskTerminal:move(step)
