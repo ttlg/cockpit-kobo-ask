@@ -1,4 +1,4 @@
 return {
     fullname = "Cockpit Ask",
-    description = [[AGI Cockpit の Ask を表示し、タップで回答します。]],
+    description = [[Show AGI Cockpit Asks and answer them by tapping.]],
 }

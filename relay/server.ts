@@ -41,7 +41,8 @@ type TerminalQuestion = {
 
 type TerminalAsk = {
   id: string;
-  heading: string;
+  title: string | null;
+  directoryLabel: string | null;
   time: string;
   summary: string;
   mediaCount: number;
@@ -111,11 +112,7 @@ const toTerminalQuestion = ({ question, ask, questionCount }: { question: Cockpi
   allowInput: question.allowInput !== false,
 });
 
-const headingOf = (ask: CockpitAsk): string => {
-  const title = ask.title || "確認リクエスト";
-  const directoryLabel = ask.directory?.split(/[\\/]/).filter(Boolean).at(-1);
-  return directoryLabel ? `${title} (${directoryLabel})` : title;
-};
+const directoryLabelOf = (directory: string | null): string | null => directory?.split(/[\\/]/).filter(Boolean).at(-1) ?? null;
 
 const timeOf = (createdAt: string): string => {
   const date = new Date(createdAt);
@@ -130,7 +127,8 @@ const toTerminalAsk = (ask: CockpitAsk): TerminalAsk => {
   const questions = questionsOf(ask);
   return {
     id: ask.id,
-    heading: headingOf(ask),
+    title: ask.title,
+    directoryLabel: directoryLabelOf(ask.directory),
     time: timeOf(ask.createdAt),
     summary: toPlainText(ask.summary),
     mediaCount: ask.media?.length ?? 0,

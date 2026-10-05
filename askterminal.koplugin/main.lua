@@ -13,6 +13,7 @@ local socketutil = require("socketutil")
 local util = require("util")
 
 local AskScreen = require("askterminal_screen")
+local T = require("askterminal_i18n")
 
 local SETTINGS_KEY = "askterminal"
 local INPUT_PREVIEW_LENGTH = 24
@@ -90,27 +91,27 @@ function AskTerminal:addToMainMenu(menu_items)
         sorting_hint = "tools",
         sub_item_table = {
             {
-                text = "Ask を受け取る",
+                text = T("receive_asks"),
                 checked_func = function() return self:setting("enabled") == true end,
                 callback = function() self:setEnabled(not self:setting("enabled")) end,
             },
             {
-                text = "受信箱を開く",
+                text = T("open_inbox"),
                 callback = function() self:poll({ manual = true }) end,
             },
             {
-                text = "Kobo のホームに戻る",
+                text = T("kobo_home"),
                 callback = function() self:exitToKoboHome() end,
             },
             {
-                text = "サーバー URL を変更",
+                text = T("change_url"),
                 keep_menu_open = true,
-                callback = function() self:editSetting({ key = "url", title = "中継サーバーの URL" }) end,
+                callback = function() self:editSetting({ key = "url", title = T("relay_url") }) end,
             },
             {
-                text = "トークンを変更",
+                text = T("change_token"),
                 keep_menu_open = true,
-                callback = function() self:editSetting({ key = "token", title = "中継サーバーのトークン" }) end,
+                callback = function() self:editSetting({ key = "token", title = T("relay_token") }) end,
             },
         },
     }
@@ -123,12 +124,12 @@ function AskTerminal:editSetting(args)
         input = self:setting(args.key) or "",
         buttons = {{
             {
-                text = "キャンセル",
+                text = T("cancel"),
                 id = "close",
                 callback = function() UIManager:close(dialog) end,
             },
             {
-                text = "保存",
+                text = T("save"),
                 is_enter_default = true,
                 callback = function()
                     self:saveSetting(args.key, dialog:getInputText())
@@ -149,14 +150,14 @@ function AskTerminal:setEnabled(enabled)
         return
     end
     self:closeViewer()
-    UIManager:show(InfoMessage:new{ text = "Ask の受け取りを止めました。", timeout = 2 })
+    UIManager:show(InfoMessage:new{ text = T("receiving_stopped"), timeout = 2 })
 end
 
 function AskTerminal:request(args)
     local url = self:setting("url")
     local token = self:setting("token")
     if not url or url == "" or not token or token == "" then
-        return nil, "サーバー URL とトークンを設定してください。"
+        return nil, T("missing_settings")
     end
     local chunks = {}
     local headers = {
@@ -181,9 +182,9 @@ function AskTerminal:request(args)
     end
     logger.warn("askterminal: request failed", args.method, args.path, code, table.concat(chunks))
     if code == 401 then
-        return nil, "トークンが違います。"
+        return nil, T("wrong_token")
     end
-    return nil, "中継サーバーにつながりません（" .. tostring(code) .. "）。"
+    return nil, T("relay_unreachable", { code = code })
 end
 
 function AskTerminal:scheduleNext(seconds)
@@ -238,7 +239,7 @@ end
 
 function AskTerminal:showEmptyState()
     UIManager:show(InfoMessage:new{
-        text = "未読はありません\n\nタスクからの質問とお知らせがここに表示されます。",
+        text = T("empty_title") .. "\n\n" .. T("empty_description"),
         timeout = 3,
     })
 end
@@ -250,7 +251,7 @@ function AskTerminal:poll(options)
     end
     if not NetworkMgr:isConnected() then
         if manual then
-            UIManager:show(InfoMessage:new{ text = "Wi-Fi に接続してください。", timeout = 3 })
+            UIManager:show(InfoMessage:new{ text = T("connect_wifi"), timeout = 3 })
         end
         return self:scheduleNext()
     end
@@ -373,22 +374,22 @@ function AskTerminal:submissionChips(args)
     local chips = {}
     if args.total > 1 then
         if args.answered > 0 then
-            table.insert(chips, string.format("回答 %d/%d", args.answered, args.total))
+            table.insert(chips, T("chip_answers", { answered = args.answered, total = args.total }))
         end
         if args.inputs > 0 then
-            table.insert(chips, string.format("自由記入 %d", args.inputs))
+            table.insert(chips, T("chip_free_text_count", { count = args.inputs }))
         end
         if args.has_whole_answer then
-            table.insert(chips, "Ask 全体に回答")
+            table.insert(chips, T("whole_title"))
         end
         return chips
     end
     local question_draft = args.draft.questions[1]
     if #question_draft.choices > 0 then
-        table.insert(chips, "選択")
+        table.insert(chips, T("chip_selection"))
     end
     if trim(question_draft.input) ~= "" then
-        table.insert(chips, "自由記入")
+        table.insert(chips, T("chip_free_text"))
     end
     return chips
 end
@@ -403,7 +404,7 @@ function AskTerminal:headerBlock(args)
         table.insert(block, {
             kind = "text",
             style = "note",
-            text = string.format("画像や動画が %d 件添付されています。Kobo では表示できないため、Mac で確認してください。", ask.mediaCount),
+            text = T("media_note", { count = ask.mediaCount }),
         })
     end
     return block
@@ -413,7 +414,7 @@ function AskTerminal:questionHeader(args)
     local question = args.question
     local header = question.title
     if question.multiple and #question.choices > 0 then
-        local badge = #args.draft.choices > 0 and string.format("［%d件選択中］", #args.draft.choices) or "［複数選択］"
+        local badge = #args.draft.choices > 0 and T("badge_selected", { count = #args.draft.choices }) or T("badge_multiple")
         header = header ~= "" and (header .. "  " .. badge) or badge
     end
     return header
@@ -443,7 +444,7 @@ function AskTerminal:questionBlock(args)
     if question.allowInput then
         table.insert(block, {
             kind = "button",
-            text = self:inputLabel({ input = question_draft.input, placeholder = "自由入力で返答" }),
+            text = self:inputLabel({ input = question_draft.input, placeholder = T("input_placeholder") }),
             callback = function() self:editAnswerText({ ask = ask, question_index = args.question_index }) end,
         })
     end
@@ -453,11 +454,11 @@ end
 function AskTerminal:wholeAnswerBlock(ask)
     return {
         { kind = "separator" },
-        { kind = "text", style = "heading", text = "Ask 全体に回答" },
-        { kind = "text", style = "note", text = "Ask 全体に宛てた回答を書けます。上の各質問への回答と一緒に送信され、空欄の質問は未回答のまま届きます。" },
+        { kind = "text", style = "heading", text = T("whole_title") },
+        { kind = "text", style = "note", text = T("whole_description") },
         {
             kind = "button",
-            text = self:inputLabel({ input = self:draftOf(ask).whole_answer, placeholder = "Ask 全体への回答..." }),
+            text = self:inputLabel({ input = self:draftOf(ask).whole_answer, placeholder = T("whole_placeholder") }),
             callback = function() self:editAnswerText({ ask = ask }) end,
         },
     }
@@ -476,15 +477,15 @@ function AskTerminal:submissionBlock(ask)
             has_whole_answer = submission.has_whole_answer,
             draft = self:draftOf(ask),
         })
-        return {{ kind = "text", style = "note", text = "送信する内容：" .. table.concat(chips, " ・ ") }}
+        return {{ kind = "text", style = "note", text = T("send_summary", { chips = table.concat(chips, T("chip_separator")) }) }}
     end
     if #ask.questions > 1 then
         return {{
             kind = "text",
             style = "note",
             text = submission.blocked
-                and "添付がある質問には選択が必要です。選択肢を選ぶか、添付を削除してください。"
-                or "すべての質問に答えるか、Ask 全体への回答を書いてください。",
+                and T("blocked")
+                or T("incomplete"),
         }}
     end
     return nil
@@ -549,7 +550,7 @@ function AskTerminal:footerRows(args)
     local rows = {}
     if self:hasSubmitButton(ask) then
         table.insert(rows, {{
-            text = "送信",
+            text = T("send"),
             bold = true,
             accent = "submit",
             enabled = self:isSubmitReady(ask),
@@ -558,32 +559,40 @@ function AskTerminal:footerRows(args)
     end
     table.insert(rows, {
         {
-            text = "閉じる",
+            text = T("close"),
             accent = "danger",
             callback = function() self:closeAsk(ask) end,
         },
         {
-            text = "◀ 前へ",
+            text = T("previous"),
             enabled = args.index > 1,
             callback = function() self:move(-1) end,
         },
         {
-            text = count > 1 and string.format("%d 件が未処理です", count) or "1 件が未処理です",
+            text = count > 1 and T("queue", { count = count }) or T("single"),
             enabled = false,
             plain = true,
             callback = function() end,
         },
         {
-            text = "次へ ▶",
+            text = T("next"),
             enabled = args.index < count,
             callback = function() self:move(1) end,
         },
     })
     table.insert(rows, {{
-        text = "Kobo のホームに戻る",
+        text = T("kobo_home"),
         callback = function() self:exitToKoboHome() end,
     }})
     return rows
+end
+
+function AskTerminal:headingOf(ask)
+    local title = type(ask.title) == "string" and ask.title ~= "" and ask.title or T("confirmation_request")
+    if type(ask.directoryLabel) == "string" and ask.directoryLabel ~= "" then
+        return title .. " (" .. ask.directoryLabel .. ")"
+    end
+    return title
 end
 
 function AskTerminal:exitToKoboHome()
@@ -596,7 +605,7 @@ function AskTerminal:render()
     local previous = self.viewer
     local scroll_offset = previous and previous.ask_id == ask.id and previous:getScrollOffset() or nil
     self.viewer = AskScreen:new{
-        title = ask.heading,
+        title = self:headingOf(ask),
         blocks = self:blocks({ ask = ask, index = index }),
         footer_rows = self:footerRows({ ask = ask, index = index }),
         scroll_offset = scroll_offset,
@@ -671,23 +680,23 @@ function AskTerminal:editAnswerText(args)
     if question then
         description = question.title ~= "" and question.title or nil
     else
-        description = "Ask 全体に宛てた回答を書けます。上の各質問への回答と一緒に送信され、空欄の質問は未回答のまま届きます。"
+        description = T("whole_description")
     end
     local dialog
     dialog = InputDialog:new{
-        title = question and "自由入力で返答" or "Ask 全体に回答",
+        title = question and T("input_placeholder") or T("whole_title"),
         description = description,
         input = current,
-        input_hint = question and "自由入力で返答" or "Ask 全体への回答...",
+        input_hint = question and T("input_placeholder") or T("whole_placeholder"),
         allow_newline = true,
         buttons = {{
             {
-                text = "キャンセル",
+                text = T("cancel"),
                 id = "close",
                 callback = function() UIManager:close(dialog) end,
             },
             {
-                text = "決定",
+                text = T("done"),
                 callback = function()
                     local text = dialog:getInputText()
                     if question then
@@ -754,11 +763,11 @@ function AskTerminal:submit(ask)
         answers = rapidjson.array(self:answerEntries(ask)),
         wholeAnswer = #ask.questions > 1 and trim(draft.whole_answer) or "",
     })
-    self:send({ ask = ask, action = "answer", body = body, failure = "送信できませんでした。" })
+    self:send({ ask = ask, action = "answer", body = body, failure = T("send_failed") })
 end
 
 function AskTerminal:closeAsk(ask)
-    self:send({ ask = ask, action = "close", body = "{}", failure = "閉じられませんでした。" })
+    self:send({ ask = ask, action = "close", body = "{}", failure = T("close_failed") })
 end
 
 function AskTerminal:onCloseWidget()

@@ -109,12 +109,14 @@ Open the menu by tapping the top edge of the screen, then go to **Tools → Cock
 
 | Item | Action |
 |---|---|
-| Ask を受け取る | Turn polling on or off |
-| 受信箱を開く | Open the Ask screen now |
-| Kobo のホームに戻る | Exit KOReader and return to the stock Kobo home |
-| サーバー URL を変更 / トークンを変更 | Change the relay URL or token on the device |
+| Receive Asks | Turn polling on or off |
+| Open inbox | Open the Ask screen now |
+| Return to Kobo home | Exit KOReader and return to the stock Kobo home |
+| Change relay URL / Change relay token | Change the relay URL or token on the device |
 
-A new Ask opens the Ask screen automatically. The × in the title bar hides it until another Ask arrives. The plugin UI is in Japanese, matching the Cockpit PWA.
+A new Ask opens the Ask screen automatically. The × in the title bar hides it until another Ask arrives.
+
+The plugin shows English or Japanese, following KOReader's language setting (**Settings → Language**). Japanese is used when KOReader is set to Japanese; English is used otherwise. The labels match the Cockpit PWA in each language.
 
 ## Limitations
 
