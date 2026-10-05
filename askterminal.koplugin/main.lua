@@ -118,7 +118,7 @@ function AskTerminal:addToMainMenu(menu_items)
             },
             {
                 text = "Kobo のホームに戻る",
-                callback = function() UIManager:broadcastEvent(Event:new("Exit")) end,
+                callback = function() self:exitToKoboHome() end,
             },
             {
                 text = "サーバー URL を変更",
@@ -588,10 +588,19 @@ function AskTerminal:footerRow(args)
     }
 end
 
+function AskTerminal:exitToKoboHome()
+    self:closeViewer()
+    UIManager:broadcastEvent(Event:new("Exit"))
+end
+
 function AskTerminal:render()
     local ask, index = self:currentAsk()
     local rows = self:answerRows(ask)
     table.insert(rows, self:footerRow({ ask = ask, index = index }))
+    table.insert(rows, {{
+        text = "Kobo のホームに戻る",
+        callback = function() self:exitToKoboHome() end,
+    }})
     local refresh = self.viewer and "ui" or "full"
     self:closeViewer()
     self.viewer = FixedTextViewer:new{
