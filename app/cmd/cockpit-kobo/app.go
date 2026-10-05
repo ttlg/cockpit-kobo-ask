@@ -51,6 +51,7 @@ type app struct {
 	results   chan any
 	pollNow   chan struct{}
 	loaded    bool
+	usbPrompt bool
 }
 
 func (a *app) quit() {
@@ -340,12 +341,16 @@ func (a *app) drawRow(args drawRowArgs) {
 	for _, spec := range args.row {
 		totalWeight += max(spec.weight, 1)
 	}
-	available := a.width() - 2*margin - gap*(len(args.row)-1)
-	left := margin
+	rowLeft, rowRight := margin, a.width()-margin
+	if args.right > args.left {
+		rowLeft, rowRight = args.left, args.right
+	}
+	available := rowRight - rowLeft - gap*(len(args.row)-1)
+	left := rowLeft
 	for index, spec := range args.row {
 		width := available * max(spec.weight, 1) / totalWeight
 		if index == len(args.row)-1 {
-			width = a.width() - margin - left
+			width = rowRight - left
 		}
 		rect := image.Rect(left, args.top, left+width, args.top+rowHeight)
 		_, labelLines, _ := measureButton(measureButtonArgs{fonts: a.fonts, spec: spec, width: width, minHeight: rowHeight})
@@ -361,6 +366,8 @@ type drawRowArgs struct {
 	target *image.RGBA
 	row    []buttonSpec
 	top    int
+	left   int
+	right  int
 }
 
 func (a *app) render(mode refreshMode) {
@@ -372,6 +379,9 @@ func (a *app) render(mode refreshMode) {
 		frame = a.editor.render(a)
 	} else {
 		frame = a.renderMain()
+	}
+	if a.usbPrompt {
+		a.drawUSBPrompt(frame)
 	}
 	if err := a.display.present(presentArgs{image: frame, mode: mode}); err != nil {
 		log.Println("present:", err)
@@ -453,11 +463,20 @@ func (a *app) onGesture(g gesture) {
 	if a.busy {
 		return
 	}
+	point := image.Point{g.x, g.y}
+	if a.usbPrompt {
+		for _, hit := range a.hits {
+			if point.In(hit.rect) {
+				hit.action()
+				return
+			}
+		}
+		return
+	}
 	if a.editor != nil {
 		a.editor.onTap(editorTapArgs{app: a, x: g.x, y: g.y})
 		return
 	}
-	point := image.Point{g.x, g.y}
 	if g.kind == gestureSwipe && point.In(a.viewport) {
 		a.scrollBy(-g.dy)
 		return
@@ -517,6 +536,7 @@ func (a *app) poller() {
 func (a *app) run(args runArgs) {
 	a.render(refreshFull)
 	go a.poller()
+	go watchCable(watchCableArgs{events: a.results, exit: a.exit})
 	for {
 		select {
 		case <-a.exit:
@@ -540,6 +560,9 @@ func (a *app) run(args runArgs) {
 				}
 			case actionResult:
 				a.applyAction(value)
+			case cableConnected:
+				a.usbPrompt = true
+				a.render(refreshFull)
 			}
 		}
 	}
@@ -549,4 +572,27 @@ type runArgs struct {
 	gestures    <-chan gesture
 	keys        <-chan keyPress
 	inputErrors <-chan error
+}
+
+func (a *app) drawUSBPrompt(frame *image.RGBA) {
+	width := a.width() - 2*margin
+	l := newLayout(newLayoutArgs{fonts: a.fonts, width: width - 2*margin})
+	l.text(layoutTextArgs{text: a.tr.text("usb_title"), style: textStyle{size: sizeHeading, bold: true, color: colorBlack}})
+	l.gap(20)
+	l.text(layoutTextArgs{text: a.tr.text("usb_description"), style: textStyle{size: sizeBody, color: colorBlack}})
+	body := l.render()
+	boxHeight := margin + body.Bounds().Dy() + 2*footerGap + rowHeight + margin
+	top := (a.height() - boxHeight) / 2
+	box := image.Rect(margin, top, a.width()-margin, top+boxHeight)
+	fillRect(fillArgs{target: frame, rect: box, color: colorWhite})
+	strokeRect(strokeArgs{target: frame, rect: box, width: 6, color: colorBlack})
+	draw.Draw(frame, body.Bounds().Add(image.Point{box.Min.X + margin, box.Min.Y + margin}), body, image.Point{}, draw.Src)
+	a.hits = nil
+	a.drawRow(drawRowArgs{target: frame, row: []buttonSpec{
+		{label: a.tr.text("usb_keep_charging"), centered: true, action: func() {
+			a.usbPrompt = false
+			a.render(refreshFull)
+		}},
+		{label: a.tr.text("usb_connect"), centered: true, bold: true, accent: accentSubmit, action: a.quit},
+	}, top: box.Max.Y - margin - rowHeight, left: box.Min.X + margin, right: box.Max.X - margin})
 }

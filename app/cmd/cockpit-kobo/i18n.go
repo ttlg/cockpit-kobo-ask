@@ -36,6 +36,10 @@ var translations = map[string]map[string]string{
 		"cancel":               "Cancel",
 		"done":                 "Done",
 		"space":                "space",
+		"usb_title":            "USB cable connected",
+		"usb_description":      "To connect to your computer, return to Kobo home. The Kobo then asks whether to connect.",
+		"usb_connect":          "Connect to computer",
+		"usb_keep_charging":    "Keep charging",
 	},
 	"ja": {
 		"empty_title":          "未読はありません",
@@ -70,6 +74,10 @@ var translations = map[string]map[string]string{
 		"cancel":               "キャンセル",
 		"done":                 "決定",
 		"space":                "space",
+		"usb_title":            "USB ケーブルが接続されました",
+		"usb_description":      "パソコンに接続するには、Kobo のホームに戻ります。戻ると、接続するかどうかを Kobo が確認します。",
+		"usb_connect":          "パソコンに接続",
+		"usb_keep_charging":    "充電だけ",
 	},
 }
 

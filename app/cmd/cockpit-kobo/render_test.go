@@ -39,7 +39,9 @@ func TestRenderPreview(t *testing.T) {
 	instance.editor = &editor{target: editorTarget{askID: "a1", questionIndex: 0}, title: "単一選択", hint: instance.tr.text("input_placeholder"), text: []rune("hello")}
 	editorFrame := instance.editor.render(instance)
 	instance.editor = nil
-	frames := map[string]*image.RGBA{"main.png": instance.renderMain(), "editor.png": editorFrame}
+	usbFrame := instance.renderMain()
+	instance.drawUSBPrompt(usbFrame)
+	frames := map[string]*image.RGBA{"main.png": instance.renderMain(), "editor.png": editorFrame, "usb.png": usbFrame}
 	for name, frame := range frames {
 		file, err := os.Create(filepath.Join(output, name))
 		if err != nil {
