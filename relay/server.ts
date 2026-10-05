@@ -229,6 +229,9 @@ const route = async ({ request, response }: { request: IncomingMessage; response
 };
 
 createServer((request, response) => {
+  response.on("finish", () => {
+    console.log(`${new Date().toISOString()} ${request.socket.remoteAddress} ${request.method} ${request.url} ${response.statusCode}`);
+  });
   route({ request, response }).catch((error: unknown) => sendJson({ response, status: 500, body: { ok: false, error: String(error) } }));
 }).listen(config.port, "0.0.0.0", () => {
   console.log(`kobo-ask relay listening on :${config.port}`);
