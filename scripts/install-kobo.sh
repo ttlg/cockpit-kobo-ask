@@ -56,6 +56,9 @@ return {
 LUA
 dot_clean -m "$kobo_mount/.adds" 2>/dev/null || true
 sync
+for file in "$repo_dir"/askterminal.koplugin/*.lua; do
+  cmp -s "$file" "$plugin_dir/$(basename "$file")" || { echo "Verification failed for $(basename "$file"). Run the script again." >&2; exit 1; }
+done
 echo "Installed the plugin. The Kobo will call $url."
 
 if $eject; then
