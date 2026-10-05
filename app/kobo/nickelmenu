@@ -1,0 +1,2 @@
+menu_item:main:AGI Cockpit:nickel_wifi:autoconnect
+  chain_always:cmd_spawn:quiet:exec /bin/sh /mnt/onboard/.adds/cockpit/launch.sh
