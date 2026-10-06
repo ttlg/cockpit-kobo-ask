@@ -119,7 +119,14 @@ scripts/install-app.sh --language en
 
 `build-app.sh` downloads Noto Sans JP into `app/fonts/` and cross-compiles `app/build/cockpit-kobo` for ARM Linux. `install-app.sh` copies the app to `.adds/cockpit/` on the Kobo, writes its `config.json`, and adds **AGI Cockpit** to NickelMenu. Restart the Kobo if the menu item does not appear.
 
-When you open **AGI Cockpit**, it connects Wi-Fi, pauses the stock Kobo software, and takes over the screen. Tap **Return to Kobo home** or press the power button to exit; the stock software resumes where it was. While the app runs, the Kobo does not sleep, so keep it on USB power for long sessions. Swipe or use the page-turn buttons to scroll, and use the on-screen English keyboard for free-text answers.
+When you open **AGI Cockpit**, it connects Wi-Fi, stops the stock Kobo software (Nickel), and takes over the screen, the same way KOReader does. Nickel holds the page-turn and power buttons exclusively, so it must stop for the app to read them. Wi-Fi stays connected.
+
+- Swipe or use the page-turn buttons to scroll.
+- Use the on-screen English keyboard for free-text answers.
+- If you plug in a USB cable, the app offers to return to Kobo home so the Kobo can ask whether to connect to your computer.
+- Tap **Return to Kobo home** or press the power button to exit. The app restarts Nickel, which takes a few seconds and opens the Kobo home screen.
+
+While the app runs, the Kobo does not sleep, so keep it on USB power for long sessions. The last run's log is saved to `.adds/cockpit/last-run.log`.
 
 Tested on a Kobo Libra Colour (1264×1680, touch axes swapped and mirrored). Other models may need different `touch` settings in `config.json`:
 

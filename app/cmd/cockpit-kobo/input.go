@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"log"
 	"os"
 	"syscall"
 	"unsafe"
@@ -162,19 +163,25 @@ type readTouchArgs struct {
 func readKeys(args readKeysArgs) {
 	file, err := os.Open(args.path)
 	if err != nil {
+		log.Println("keys:", args.path, err)
 		return
 	}
+	log.Println("keys: reading", args.path)
 	defer file.Close()
 	release := grab(file)
 	defer release()
 	buffer := make([]byte, 16)
 	for {
 		if _, err := file.Read(buffer); err != nil {
+			log.Println("keys:", args.path, err)
 			return
 		}
 		kind := binary.LittleEndian.Uint16(buffer[8:])
 		code := binary.LittleEndian.Uint16(buffer[10:])
 		value := int32(binary.LittleEndian.Uint32(buffer[12:]))
+		if kind != evSyn {
+			log.Println("input:", args.path, "type", kind, "code", code, "value", value)
+		}
 		if kind == evKey && value == 1 {
 			args.keys <- keyPress{code: int(code)}
 		}
